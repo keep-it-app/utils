@@ -3,9 +3,11 @@ package tracing
 import (
 	"context"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -35,6 +37,32 @@ func TestInitDisabled(t *testing.T) {
 	ctx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
 	if !trace.SpanContextFromContext(ctx).IsValid() {
 		t.Error("propagator did not extract a valid context when disabled")
+	}
+}
+
+func TestInitEnabledBuildsResource(t *testing.T) {
+	// The enabled path builds an OTel resource by merging resource.Default()
+	// with service attributes. A semconv version mismatch makes resource.Merge
+	// return a conflicting-schema-URL error, which must not happen.
+	shutdown, err := Init(context.Background(), Config{
+		Enabled:     true,
+		Endpoint:    "127.0.0.1:4317", // exporter connects lazily; no dial here
+		ServiceName: "test-service",
+		Environment: "test",
+		SampleRatio: 1,
+	})
+	if err != nil {
+		t.Fatalf("Init(enabled) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+	})
+
+	if _, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider); !ok {
+		t.Errorf("expected an SDK TracerProvider when enabled, got %T",
+			otel.GetTracerProvider())
 	}
 }
 
